@@ -240,39 +240,25 @@ class VectorQuantizer2(nn.Module):
         Returns:
             Selected feature tensor (B, C, H, W)
         """
-        # Repeat f_hat for each candidate
         f_hat = rearrange(f_hat.unsqueeze(1).repeat(1, k, 1, 1, 1), 'b k c p1 p2 -> (b k) c p1 p2')
         f_hat = f_hat + h  # Combine current feature with candidate
         label_B = rearrange(label_B[:, None].repeat(1, k), 'b k -> (b k)')
         si_idx = torch.full((f_hat.size(0),), si, device=f_hat.device, dtype=torch.long)
 
-        # Get discriminator scores
         scores = discriminator(f_hat, label_B, si_idx)  # (b*k, 1)
         scores = rearrange(scores, '(b k) 1 -> b k', k=k)  # (B, k)
 
         if top_k == 1 or scores.shape[1] == 1:
-            # Greedy: argmax
             max_idx = torch.argmax(scores, dim=1)  # (B,)
         else:
             actual_top_k = min(top_k, scores.shape[1])  # Safe top-k
-
-            # Top-K: get top-k scores and indices
             topk_scores, topk_indices = torch.topk(scores, actual_top_k, dim=1)  # (B, actual_top_k)
-
-            # Apply temperature
             topk_scores_scaled = topk_scores / temperature
             probs = torch.softmax(topk_scores_scaled, dim=1)  # (B, actual_top_k)
-
-            # Sample from the top-k
             sampled_idx_in_topk = torch.multinomial(probs, num_samples=1).squeeze(1)  # (B,)
-
-            # Map back to global vocab index
             max_idx = torch.gather(topk_indices, 1, sampled_idx_in_topk.unsqueeze(1)).squeeze(1)  # (B,)
             
-        # Reshape f_hat to (B, k, C, H, W)
         f_hat_reshaped = rearrange(f_hat, '(b k) c p1 p2 -> b k c p1 p2', k=k)
-
-        # Gather selected candidates
         return f_hat_reshaped[torch.arange(f_hat_reshaped.size(0)), max_idx]
 
 
